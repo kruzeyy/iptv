@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreamHub - Lecteur IPTV Pro (Filtre FR)</title>
+  
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              800: '#075985',
+              900: '#0c4a6e',
+            },
+            dark: {
+              bg: '#0b0f19',
+              card: '#111827',
+              sidebar: '#1f2937',
+              border: '#374151'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- HLS.js pour le streaming M3U8 / TS sans stockage -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js"></script>
+
+  <style>
+    /* Scrollbar personnalisée */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #111827;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #4b5563;
+    }
+    .aspect-poster {
+      aspect-ratio: 2/3;
+    }
+  </style>
+</head>
+<body class="bg-dark-bg text-gray-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+
+  <!-- BARRE DE NAVIGATION EN HAUT -->
+  <header class="h-16 bg-dark-card border-b border-dark-border px-4 flex items-center justify-between z-20 flex-shrink-0">
+    <!-- Logo & Status -->
+    <div class="flex items-center space-x-3">
+      <div class="p-2 bg-brand-600 rounded-lg text-white">
+        <i data-lucide="tv" class="w-6 h-6"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-lg leading-none tracking-wide text-white">Stream<span class="text-brand-500">Hub</span> <span class="text-xs px-1.5 py-0.5 rounded bg-brand-900/80 text-brand-400 font-normal border border-brand-700/50">FR Default</span></h1>
+        <div id="account-status" class="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+          <span class="w-2 h-2 rounded-full bg-yellow-500 inline-block" id="status-dot"></span>
+          <span id="status-text">Initialisation...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ONGLETS PRINCIPAUX -->
+    <nav class="hidden md:flex items-center space-x-1 bg-gray-900/80 p-1 rounded-xl border border-gray-800">
+      <button onclick="switchTab('live')" id="tab-btn-live" class="tab-btn flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-brand-500 bg-gray-800">
+        <i data-lucide="tv" class="w-4 h-4"></i>
+        <span>En Direct</span>
+      </button>
+      <button onclick="switchTab('vod')" id="tab-btn-vod" class="tab-btn flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-gray-800/50">
+        <i data-lucide="film" class="w-4 h-4"></i>
+        <span>Films</span>
+      </button>
+      <button onclick="switchTab('series')" id="tab-btn-series" class="tab-btn flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-gray-800/50">
+        <i data-lucide="clapperboard" class="w-4 h-4"></i>
+        <span>Séries</span>
+      </button>
+      <button onclick="switchTab('radio')" id="tab-btn-radio" class="tab-btn flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-gray-800/50">
+        <i data-lucide="radio" class="w-4 h-4"></i>
+        <span>Radios</span>
+      </button>
+    </nav>
+
+    <!-- BOUTONS ACTION -->
+    <div class="flex items-center space-x-2">
+      <!-- Filtre FR Rapide -->
+      <button onclick="applyFrenchFilter()" title="Re-filtrer uniquement le contenu Français" class="px-3 py-1.5 rounded-lg border border-brand-700/50 bg-brand-950/60 hover:bg-brand-900/80 text-xs text-brand-400 flex items-center gap-1.5 transition">
+        <span>🇫🇷</span>
+        <span class="hidden sm:inline font-medium">Contenu FR</span>
+      </button>
+
+      <!-- Activation Proxy CORS -->
+      <button id="proxy-btn" onclick="toggleProxy()" title="Activer/Désactiver le Proxy CORS si les requêtes sont bloquées" class="px-3 py-1.5 rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-700 text-xs text-gray-300 flex items-center gap-1.5 transition">
+        <i data-lucide="shield-alert" class="w-3.5 h-3.5 text-yellow-400"></i>
+        <span>Proxy: <strong id="proxy-status-text" class="text-green-400 font-bold">ON</strong></span>
+      </button>
+
+      <!-- Paramètres / Config -->
+      <button onclick="openConfigModal()" class="p-2 rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-200 transition" title="Paramètres">
+        <i data-lucide="settings" class="w-5 h-5"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- BARRE D'ONGLETS MOBILE -->
+  <div class="md:hidden flex bg-dark-card border-b border-dark-border px-2 py-2 overflow-x-auto justify-around">
+    <button onclick="switchTab('live')" class="mobile-tab-btn text-xs flex flex-col items-center p-1 text-brand-500" id="mtab-live">
+      <i data-lucide="tv" class="w-5 h-5 mb-0.5"></i> Live
+    </button>
+    <button onclick="switchTab('vod')" class="mobile-tab-btn text-xs flex flex-col items-center p-1 text-gray-400" id="mtab-vod">
+      <i data-lucide="film" class="w-5 h-5 mb-0.5"></i> Films
+    </button>
+    <button onclick="switchTab('series')" class="mobile-tab-btn text-xs flex flex-col items-center p-1 text-gray-400" id="mtab-series">
+      <i data-lucide="clapperboard" class="w-5 h-5 mb-0.5"></i> Séries
+    </button>
+    <button onclick="switchTab('radio')" class="mobile-tab-btn text-xs flex flex-col items-center p-1 text-gray-400" id="mtab-radio">
+      <i data-lucide="radio" class="w-5 h-5 mb-0.5"></i> Radio
+    </button>
+  </div>
+
+  <!-- ZONE PRINCIPALE -->
+  <div class="flex-1 flex overflow-hidden relative">
+    
+    <!-- BARRE SIDÉRALE (Catégories & Liste) -->
+    <aside class="w-full md:w-80 lg:w-96 bg-dark-card border-r border-dark-border flex flex-col flex-shrink-0 z-10 transition-all duration-300">
+      
+      <!-- Barre de recherche et filtre -->
+      <div class="p-3 border-b border-dark-border space-y-2 bg-gray-900/50">
+        <!-- Input Recherche -->
+        <div class="relative">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-gray-400"></i>
+          <input type="text" id="search-input" oninput="filterContent()" placeholder="Rechercher une chaîne, un film..." 
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-brand-500 text-white placeholder-gray-500">
+        </div>
+        
+        <!-- Sélecteur de Catégorie avec Option FR activée par défaut -->
+        <div class="relative">
+          <select id="category-select" onchange="filterContent()" 
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-brand-500 appearance-none cursor-pointer">
+            <option value="fr_default">🇫🇷 France / FR (Défaut par filtre)</option>
+            <option value="all">🌐 Tous / Toutes les catégories</option>
+          </select>
+          <i data-lucide="chevron-down" class="w-4 h-4 absolute right-3 top-3 text-gray-400 pointer-events-none"></i>
+        </div>
+      </div>
+
+      <!-- Compteur et Infos -->
+      <div class="px-3 py-1.5 bg-gray-900/80 border-b border-dark-border flex justify-between items-center text-xs text-gray-400">
+        <span id="items-count">0 élément(s)</span>
+        <button onclick="loadCurrentTabContent(true)" class="hover:text-white flex items-center gap-1 transition">
+          <i data-lucide="refresh-cw" class="w-3 h-3"></i> Actualiser
+        </button>
+      </div>
+
+      <!-- Conteneur défilant de la liste -->
+      <div id="content-list" class="flex-1 overflow-y-auto p-2 space-y-1 divide-y divide-gray-800/40">
+        <div class="p-8 text-center text-gray-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-brand-500"></i>
+          <p class="text-sm">Chargement des données...</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- CONTENU PRINCIPAL (Lecteur & Métadonnées) -->
+    <main class="flex-1 bg-black flex flex-col overflow-hidden relative">
+      
+      <!-- CONTENEUR DU LECTEUR VIDÉO / AUDIO -->
+      <div class="flex-1 bg-black flex items-center justify-center relative group">
+        <!-- Moniteur de lecture / Vidéo -->
+        <video id="main-player" controls class="w-full h-full max-h-full object-contain"></video>
+
+        <!-- Visualiseur Audio (Mode Radio) -->
+        <div id="radio-visualizer" class="hidden absolute inset-0 bg-gradient-to-br from-indigo-950 via-slate-900 to-black flex flex-col items-center justify-center text-center p-6">
+          <div class="w-32 h-32 rounded-full bg-brand-600/20 border-2 border-brand-500 flex items-center justify-center mb-6 animate-pulse">
+            <i data-lucide="radio" class="w-16 h-16 text-brand-400"></i>
+          </div>
+          <h2 id="radio-title" class="text-2xl font-bold text-white mb-2">Station Radio</h2>
+          <p id="radio-subtitle" class="text-gray-400 text-sm max-w-md">Lecture du flux audio en direct</p>
+        </div>
+
+        <!-- Overlays de notification ou d'erreur -->
+        <div id="player-overlay" class="hidden absolute inset-0 bg-black/80 flex flex-col items-center justify-center p-6 text-center z-10">
+          <i id="overlay-icon" data-lucide="alert-circle" class="w-12 h-12 text-red-500 mb-3"></i>
+          <h3 id="overlay-title" class="text-lg font-semibold text-white mb-1">Erreur de lecture</h3>
+          <p id="overlay-msg" class="text-sm text-gray-400 max-w-md mb-4">Impossible de charger ce flux.</p>
+          <button onclick="retryPlayback()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium transition">
+            Réessayer
+          </button>
+        </div>
+      </div>
+
+      <!-- BARRE D'INFORMATIONS DU PROGRAMME SÉLECTIONNÉ -->
+      <div id="media-info-bar" class="bg-dark-card border-t border-dark-border p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 flex-shrink-0">
+        <div class="flex items-center space-x-3">
+          <img id="media-icon" src="https://placehold.co/64x64/111827/0ea5e9?text=IPTV" alt="Logo" class="w-12 h-12 rounded-lg object-contain bg-gray-900 border border-gray-800">
+          <div>
+            <div class="flex items-center space-x-2">
+              <span id="media-badge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-brand-600 text-white">LIVE</span>
+              <h2 id="media-title" class="font-semibold text-base text-white">Sélectionnez un contenu</h2>
+            </div>
+            <p id="media-desc" class="text-xs text-gray-400 mt-0.5 line-clamp-1">Choisissez une chaîne ou un film dans la liste à gauche.</p>
+          </div>
+        </div>
+
+        <!-- Informations supplémentaires -->
+        <div id="epg-box" class="text-right text-xs text-gray-400 hidden md:block">
+          <div class="font-medium text-gray-300">Format: <span id="info-format" class="text-brand-400">---</span></div>
+          <div id="info-server" class="text-[11px] text-gray-500">Serveur connecté</div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- MODAL SÉRIES (Sélection Saison & Épisode) -->
+  <div id="series-modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-dark-card border border-dark-border rounded-xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl relative">
+      <div class="flex items-center justify-between p-4 border-b border-gray-800">
+        <h3 id="series-modal-title" class="text-lg font-bold text-white flex items-center gap-2">
+          <i data-lucide="clapperboard" class="w-5 h-5 text-brand-500"></i> Détails de la Série
+        </h3>
+        <button onclick="closeSeriesModal()" class="text-gray-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-4 overflow-y-auto flex-1 space-y-4">
+        <!-- En-tête Série -->
+        <div class="flex gap-4">
+          <img id="series-modal-cover" src="" class="w-24 h-36 rounded-lg object-cover bg-gray-900 flex-shrink-0">
+          <div>
+            <h4 id="series-modal-name" class="font-bold text-lg text-white"></h4>
+            <p id="series-modal-plot" class="text-xs text-gray-400 mt-1 line-clamp-4 leading-relaxed"></p>
+          </div>
+        </div>
+
+        <!-- Sélecteur de Saison -->
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Saison :</label>
+          <select id="season-select" onchange="renderEpisodesForSeason()" class="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-brand-500">
+          </select>
+        </div>
+
+        <!-- Liste des Épisodes -->
+        <div class="space-y-1">
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Épisodes :</label>
+          <div id="episodes-list" class="space-y-1.5 max-h-60 overflow-y-auto">
+            <!-- Rempli en JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DE CONFIGURATION (PARAMÈTRES IDENTIFIANTS) -->
+  <div id="config-modal" class="hidden fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-dark-card border border-dark-border rounded-xl max-w-md w-full p-6 shadow-2xl relative">
+      <div class="flex items-center justify-between mb-4 border-b border-gray-800 pb-3">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <i data-lucide="settings" class="w-5 h-5 text-brand-500"></i> Paramètres IPTV Xtream
+        </h3>
+        <button onclick="closeConfigModal()" class="text-gray-400 hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <form id="config-form" onsubmit="saveConfiguration(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">URL du Serveur</label>
+          <input type="text" id="cfg-server" required placeholder="http://exemple.com:8080"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Nom d'utilisateur (Username)</label>
+          <input type="text" id="cfg-user" required placeholder="Utilisateur"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Mot de passe (Password)</label>
+          <input type="password" id="cfg-pass" required placeholder="Mot de passe"
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+        </div>
+
+        <!-- Proxy Toggle -->
+        <div class="p-3 bg-gray-900 rounded-lg border border-gray-800 flex items-center justify-between">
+          <div>
+            <div class="text-xs font-semibold text-gray-200">Bypass CORS via Proxy</div>
+            <div class="text-[11px] text-gray-400">Permet le chargement sans blocage navigateur</div>
+          </div>
+          <input type="checkbox" id="cfg-proxy" class="w-4 h-4 accent-brand-500 rounded cursor-pointer">
+        </div>
+
+        <div class="pt-2 flex justify-end space-x-2">
+          <button type="button" onclick="closeConfigModal()" class="px-4 py-2 rounded-lg border border-gray-700 text-sm font-medium text-gray-300 hover:bg-gray-800">
+            Annuler
+          </button>
+          <button type="submit" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg text-sm font-medium transition">
+            Enregistrer & Reconnecter
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- LOGIQUE JAVASCRIPT -->
+  <script>
+    // Config par défaut pré-remplie
+    const DEFAULT_CONFIG = {
+      server: "http://smartersprotv.myftp.biz",
+      user: "0ade329f6c",
+      pass: "e813e7605da3",
+      useProxy: true // Activé par défaut pour éviter le blocage CORS
+    };
+
+    // Expression régulière pour identifier le contenu Français
+    const FRENCH_REGEX = /(FR|FRANCE|FRENCH|\bFR\b|\|FR\||FR:)/i;
+
+    // État Global de l'application
+    let config = { ...DEFAULT_CONFIG };
+    let currentTab = 'live'; // 'live', 'vod', 'series', 'radio'
+    let categoriesMap = new Map();
+    let rawCategories = [];
+    let currentRawData = [];
+    let activeMedia = null;
+    let hlsPlayer = null;
+    let currentSeriesData = null;
+
+    // Proxy CORS pour contourner les limitations des requêtes HTTP directes
+    const CORS_PROXY = "https://corsproxy.io/?";
+
+    // Initialisation
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      loadSavedConfig();
+      initPlayer();
+      connectAndFetchAccount();
+    });
+
+    function loadSavedConfig() {
+      const saved = localStorage.getItem('iptv_config_v2');
+      if (saved) {
+        try { config = JSON.parse(saved); } catch(e){}
+      }
+      updateProxyUI();
+    }
+
+    function saveConfiguration(e) {
+      e.preventDefault();
+      config.server = document.getElementById('cfg-server').value.trim().replace(/\/$/, "");
+      config.user   = document.getElementById('cfg-user').value.trim();
+      config.pass   = document.getElementById('cfg-pass').value.trim();
+      config.useProxy = document.getElementById('cfg-proxy').checked;
+
+      localStorage.setItem('iptv_config_v2', JSON.stringify(config));
+      updateProxyUI();
+      closeConfigModal();
+      connectAndFetchAccount();
+    }
+
+    function openConfigModal() {
+      document.getElementById('cfg-server').value = config.server;
+      document.getElementById('cfg-user').value   = config.user;
+      document.getElementById('cfg-pass').value   = config.pass;
+      document.getElementById('cfg-proxy').checked = config.useProxy;
+      document.getElementById('config-modal').classList.remove('hidden');
+    }
+
+    function closeConfigModal() {
+      document.getElementById('config-modal').classList.add('hidden');
+    }
+
+    function toggleProxy() {
+      config.useProxy = !config.useProxy;
+      localStorage.setItem('iptv_config_v2', JSON.stringify(config));
+      updateProxyUI();
+      loadCurrentTabContent(true);
+    }
+
+    function updateProxyUI() {
+      const txt = document.getElementById('proxy-status-text');
+      if (config.useProxy) {
+        txt.innerText = "ON";
+        txt.className = "text-green-400 font-bold";
+      } else {
+        txt.innerText = "OFF";
+        txt.className = "text-red-400 font-bold";
+      }
+    }
+
+    // --- HELPER DE CONSTRUCTION D'URLS ---
+    function buildApiUrl(action) {
+      let base = `${config.server}/player_api.php?username=${config.user}&password=${config.pass}`;
+      if (action) base += `&action=${action}`;
+      return config.useProxy ? `${CORS_PROXY}${encodeURIComponent(base)}` : base;
+    }
+
+    function buildStreamUrl(type, streamId, ext = 'm3u8') {
+      let url = "";
+      if (type === 'live' || type === 'radio') {
+        url = `${config.server}/live/${config.user}/${config.pass}/${streamId}.${ext}`;
+      } else if (type === 'vod') {
+        url = `${config.server}/movie/${config.user}/${config.pass}/${streamId}.${ext}`;
+      } else if (type === 'series') {
+        url = `${config.server}/series/${config.user}/${config.pass}/${streamId}.${ext}`;
+      }
+      return config.useProxy ? `${CORS_PROXY}${encodeURIComponent(url)}` : url;
+    }
+
+    // --- CONNEXION COMPTE ---
+    async function connectAndFetchAccount() {
+      const statusText = document.getElementById('status-text');
+      const statusDot  = document.getElementById('status-dot');
+      
+      statusText.innerText = "Connexion au serveur...";
+      statusDot.className = "w-2 h-2 rounded-full bg-yellow-500 inline-block";
+
+      try {
+        const res = await fetch(buildApiUrl());
+        if (!res.ok) throw new Error("Réponse serveur invalide");
+        
+        const data = await res.json();
+        if (data.user_info && data.user_info.auth === 1) {
+          statusText.innerText = `Connecté (${data.user_info.username})`;
+          statusDot.className = "w-2 h-2 rounded-full bg-green-500 inline-block";
+          document.getElementById('info-server').innerText = `Serveur: ${config.server}`;
+          
+          loadCurrentTabContent();
+        } else {
+          throw new Error("Identifiants incorrects ou expiré");
+        }
+      } catch (err) {
+        console.error("Erreur de connexion:", err);
+        statusText.innerText = "Erreur de connexion";
+        statusDot.className = "w-2 h-2 rounded-full bg-red-500 inline-block";
+        showErrorInList("Impossible de se connecter au serveur IPTV. Si vous êtes dans un navigateur moderne, conservez l'option Proxy activée.");
+      }
+    }
+
+    // --- NAVIGATION D'ONGLETS ---
+    function switchTab(tab) {
+      if (currentTab === tab) return;
+      currentTab = tab;
+
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.className = "tab-btn flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-gray-400 hover:text-white hover:bg-gray-800/50";
+      });
+      const activeBtn = document.getElementById(`tab-btn-${tab}`);
+      if(activeBtn) activeBtn.className = "tab-btn flex items-center space-x-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 text-brand-500 bg-gray-800";
+
+      document.querySelectorAll('.mobile-tab-btn').forEach(btn => btn.className = "mobile-tab-btn text-xs flex flex-col items-center p-1 text-gray-400");
+      const activeMobileBtn = document.getElementById(`mtab-${tab}`);
+      if(activeMobileBtn) activeMobileBtn.className = "mobile-tab-btn text-xs flex flex-col items-center p-1 text-brand-500";
+
+      document.getElementById('search-input').value = "";
+      loadCurrentTabContent();
+    }
+
+    // --- CHARGEMENT DES DONNÉES & FILTRE PAR DÉFAUT FRANÇAIS ---
+    async function loadCurrentTabContent(force = false) {
+      const listContainer = document.getElementById('content-list');
+      listContainer.innerHTML = `
+        <div class="p-8 text-center text-gray-500">
+          <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-2 text-brand-500"></i>
+          <p class="text-sm">Chargement du contenu...</p>
+        </div>`;
+      lucide.createIcons();
+
+      let catAction = "";
+      let streamAction = "";
+
+      if (currentTab === 'live' || currentTab === 'radio') {
+        catAction = "get_live_categories";
+        streamAction = "get_live_streams";
+      } else if (currentTab === 'vod') {
+        catAction = "get_vod_categories";
+        streamAction = "get_vod_streams";
+      } else if (currentTab === 'series') {
+        catAction = "get_series_categories";
+        streamAction = "get_series";
+      }
+
+      try {
+        const [catRes, streamRes] = await Promise.all([
+          fetch(buildApiUrl(catAction)),
+          fetch(buildApiUrl(streamAction))
+        ]);
+
+        rawCategories = await catRes.json();
+        let streams = await streamRes.json();
+
+        if (currentTab === 'radio') {
+          streams = streams.filter(s => {
+            const catName = getCategoryNameById(rawCategories, s.category_id).toLowerCase();
+            const streamName = (s.name || "").toLowerCase();
+            return catName.includes('radio') || catName.includes('audio') || streamName.includes('radio') || streamName.includes('fm');
+          });
+        }
+
+        categoriesMap.clear();
+        if (Array.isArray(rawCategories)) {
+          rawCategories.forEach(c => categoriesMap.set(c.category_id, c.category_name));
+        }
+
+        currentRawData = Array.isArray(streams) ? streams : [];
+
+        // Remplir le sélecteur avec les catégories et PRÉ-SÉLECTIONNER le Français
+        populateCategoriesAndSetDefaultFR();
+
+      } catch (err) {
+        console.error("Erreur chargement onglet:", err);
+        showErrorInList("Erreur lors de la récupération des éléments.");
+      }
+    }
+
+    function getCategoryNameById(categoriesList, catId) {
+      if(!Array.isArray(categoriesList)) return "";
+      const found = categoriesList.find(c => c.category_id === catId);
+      return found ? found.category_name : "";
+    }
+
+    // PRÉ-SÉLECTION INTELLIGENTE DU FILTRE FRANÇAIS
+    function populateCategoriesAndSetDefaultFR() {
+      const select = document.getElementById('category-select');
+      select.innerHTML = "";
+
+      // Options par défaut
+      const frDefaultOpt = document.createElement('option');
+      frDefaultOpt.value = "fr_default";
+      frDefaultOpt.textContent = "🇫🇷 Contenu Français (Filtre par Défaut)";
+      select.appendChild(frDefaultOpt);
+
+      const allOpt = document.createElement('option');
+      allOpt.value = "all";
+      allOpt.textContent = `🌐 Tous / Toutes les catégories (${currentRawData.length})`;
+      select.appendChild(allOpt);
+
+      // Chercher si une catégorie correspond spécifiquement au Français
+      let bestFrCategoryId = null;
+
+      if (Array.isArray(rawCategories)) {
+        rawCategories.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.category_id;
+          opt.textContent = c.category_name;
+          select.appendChild(opt);
+
+          // Si le nom de la catégorie correspond au Français
+          if (!bestFrCategoryId && FRENCH_REGEX.test(c.category_name)) {
+            bestFrCategoryId = c.category_id;
+          }
+        });
+      }
+
+      // Sélectionner par défaut la catégorie FR si trouvée, sinon garder l'option de filtre FR
+      if (bestFrCategoryId) {
+        select.value = bestFrCategoryId;
+      } else {
+        select.value = "fr_default";
+      }
+
+      filterContent();
+    }
+
+    function applyFrenchFilter() {
+      populateCategoriesAndSetDefaultFR();
+    }
+
+    // --- FILTRAGE ET RENDU ---
+    function filterContent() {
+      const searchTerm = document.getElementById('search-input').value.toLowerCase().trim();
+      const selectedCat = document.getElementById('category-select').value;
+
+      const filtered = currentRawData.filter(item => {
+        const catName = categoriesMap.get(item.category_id) || "";
+        const streamName = item.name || "";
+
+        // 1. Filtrage par recherche texte
+        const matchesSearch = !searchTerm || streamName.toLowerCase().includes(searchTerm) || catName.toLowerCase().includes(searchTerm);
+
+        // 2. Filtrage par catégorie
+        let matchesCat = false;
+        if (selectedCat === 'all') {
+          matchesCat = true;
+        } else if (selectedCat === 'fr_default') {
+          // Filtre automatique FR par défaut si aucune catégorie globale n'est sélectionnée
+          matchesCat = FRENCH_REGEX.test(catName) || FRENCH_REGEX.test(streamName);
+        } else {
+          matchesCat = (String(item.category_id) === String(selectedCat));
+        }
+
+        return matchesSearch && matchesCat;
+      });
+
+      renderContentList(filtered);
+    }
+
+    function renderContentList(items) {
+      const listContainer = document.getElementById('content-list');
+      document.getElementById('items-count').innerText = `${items.length} élément(s)`;
+
+      if (items.length === 0) {
+        listContainer.innerHTML = `
+          <div class="p-8 text-center text-gray-500">
+            <i data-lucide="search-x" class="w-8 h-8 mx-auto mb-2 text-gray-600"></i>
+            <p class="text-sm">Aucun résultat dans cette catégorie.</p>
+            <button onclick="document.getElementById('category-select').value='all'; filterContent();" class="mt-3 text-xs text-brand-400 hover:underline">
+              Afficher toutes les catégories
+            </button>
+          </div>`;
+        lucide.createIcons();
+        return;
+      }
+
+      listContainer.innerHTML = "";
+
+      // Mode Cartes (VOD / Séries)
+      if (currentTab === 'vod' || currentTab === 'series') {
+        const grid = document.createElement('div');
+        grid.className = "grid grid-cols-2 gap-2 p-1";
+
+        items.forEach(item => {
+          const card = document.createElement('div');
+          card.className = "bg-gray-800/60 rounded-lg overflow-hidden border border-gray-700/50 hover:border-brand-500 cursor-pointer transition group flex flex-col";
+          
+          const icon = item.stream_icon || item.cover || 'https://placehold.co/150x225/111827/0ea5e9?text=Pas+d+image';
+
+          card.innerHTML = `
+            <div class="aspect-poster relative overflow-hidden bg-gray-900">
+              <img src="${icon}" onerror="this.src='https://placehold.co/150x225/111827/0ea5e9?text=Pas+d+image'" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+              <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-2">
+                <i data-lucide="play-circle" class="w-8 h-8 text-brand-500 mx-auto"></i>
+              </div>
+            </div>
+            <div class="p-2 flex-1 flex flex-col justify-between">
+              <div class="font-medium text-xs text-white line-clamp-1">${item.name || 'Sans titre'}</div>
+              <div class="text-[10px] text-gray-400 mt-1 truncate">${categoriesMap.get(item.category_id) || ''}</div>
+            </div>
+          `;
+          card.onclick = () => selectMedia(item);
+          grid.appendChild(card);
+        });
+
+        listContainer.appendChild(grid);
+      } else {
+        // Mode Liste (TV Live & Radio)
+        items.forEach(item => {
+          const row = document.createElement('div');
+          row.className = "p-2 rounded-lg hover:bg-gray-800/80 cursor-pointer transition flex items-center space-x-3 group border border-transparent hover:border-gray-700";
+          
+          const icon = item.stream_icon || 'https://placehold.co/48x48/111827/0ea5e9?text=TV';
+
+          row.innerHTML = `
+            <img src="${icon}" onerror="this.src='https://placehold.co/48x48/111827/0ea5e9?text=TV'" class="w-10 h-10 rounded object-contain bg-gray-900 border border-gray-800 flex-shrink-0">
+            <div class="flex-1 min-w-0">
+              <div class="font-medium text-sm text-gray-200 group-hover:text-brand-400 truncate">${item.name || 'Chaîne'}</div>
+              <div class="text-xs text-gray-500 truncate">${categoriesMap.get(item.category_id) || 'En direct'}</div>
+            </div>
+            <i data-lucide="play" class="w-4 h-4 text-gray-600 group-hover:text-brand-500 flex-shrink-0"></i>
+          `;
+          row.onclick = () => selectMedia(item);
+          listContainer.appendChild(row);
+        });
+      }
+
+      lucide.createIcons();
+    }
+
+    function showErrorInList(msg) {
+      const listContainer = document.getElementById('content-list');
+      listContainer.innerHTML = `
+        <div class="p-6 text-center text-red-400">
+          <i data-lucide="alert-triangle" class="w-8 h-8 mx-auto mb-2 text-red-500"></i>
+          <p class="text-xs leading-relaxed">${msg}</p>
+        </div>`;
+      lucide.createIcons();
+    }
+
+    // --- SELECTION MEDIA ET SERIE ---
+    async function selectMedia(item) {
+      activeMedia = item;
+      
+      // Si c'est une série, ouvrir le modal de choix de saison/épisode
+      if (currentTab === 'series') {
+        openSeriesModal(item);
+        return;
+      }
+
+      const icon = item.stream_icon || item.cover || 'https://placehold.co/64x64/111827/0ea5e9?text=IPTV';
+      document.getElementById('media-icon').src = icon;
+      document.getElementById('media-title').innerText = item.name || "Inconnu";
+      document.getElementById('media-desc').innerText = `Catégorie: ${categoriesMap.get(item.category_id) || 'Général'}`;
+      document.getElementById('media-badge').innerText = currentTab.toUpperCase();
+
+      const ext = item.container_extension || (currentTab === 'live' || currentTab === 'radio' ? 'm3u8' : 'mp4');
+      document.getElementById('info-format').innerText = ext.toUpperCase();
+
+      const radioVisualizer = document.getElementById('radio-visualizer');
+      if (currentTab === 'radio') {
+        radioVisualizer.classList.remove('hidden');
+        document.getElementById('radio-title').innerText = item.name;
+        document.getElementById('radio-subtitle').innerText = categoriesMap.get(item.category_id) || "Station Audio";
+      } else {
+        radioVisualizer.classList.add('hidden');
+      }
+
+      const streamId = item.stream_id;
+      const streamUrl = buildStreamUrl(currentTab, streamId, ext);
+
+      playStream(streamUrl, ext);
+    }
+
+    // --- GESTION DES SÉRIES ---
+    async function openSeriesModal(item) {
+      document.getElementById('series-modal-title').innerText = item.name || "Série";
+      document.getElementById('series-modal-name').innerText = item.name || "";
+      document.getElementById('series-modal-cover').src = item.cover || item.stream_icon || "https://placehold.co/150x225/111827/0ea5e9?text=Série";
+      document.getElementById('series-modal-plot').innerText = item.plot || "Chargement des détails de la série...";
+      
+      document.getElementById('series-modal').classList.remove('hidden');
+
+      try {
+        const res = await fetch(buildApiUrl(`get_series_info&series_id=${item.series_id}`));
+        const data = await res.json();
+        currentSeriesData = data;
+
+        const seasons = data.seasons || [];
+        const seasonSelect = document.getElementById('season-select');
+        seasonSelect.innerHTML = "";
+
+        if (Array.isArray(seasons)) {
+          seasons.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.season_number;
+            opt.textContent = s.name || `Saison ${s.season_number}`;
+            seasonSelect.appendChild(opt);
+          });
+        }
+
+        renderEpisodesForSeason();
+      } catch(e) {
+        console.error("Erreur détails série:", e);
+      }
+    }
+
+    function renderEpisodesForSeason() {
+      const seasonNum = document.getElementById('season-select').value;
+      const episodesList = document.getElementById('episodes-list');
+      episodesList.innerHTML = "";
+
+      if (!currentSeriesData || !currentSeriesData.episodes || !currentSeriesData.episodes[seasonNum]) {
+        episodesList.innerHTML = `<div class="text-xs text-gray-500">Aucun épisode trouvé.</div>`;
+        return;
+      }
+
+      const eps = currentSeriesData.episodes[seasonNum];
+      eps.forEach(ep => {
+        const div = document.createElement('div');
+        div.className = "p-2 bg-gray-800/80 hover:bg-brand-600 rounded-lg flex items-center justify-between cursor-pointer transition text-xs";
+        div.innerHTML = `
+          <span class="font-medium">Épisode ${ep.episode_num} - ${ep.title || 'Sans titre'}</span>
+          <i data-lucide="play" class="w-3.5 h-3.5"></i>
+        `;
+        div.onclick = () => {
+          closeSeriesModal();
+          playEpisode(ep);
+        };
+        episodesList.appendChild(div);
+      });
+      lucide.createIcons();
+    }
+
+    function playEpisode(ep) {
+      const ext = ep.container_extension || 'mp4';
+      const streamUrl = buildStreamUrl('series', ep.id, ext);
+
+      document.getElementById('media-icon').src = ep.info?.movie_image || 'https://placehold.co/64x64/111827/0ea5e9?text=Épisode';
+      document.getElementById('media-title').innerText = `${ep.title || 'Épisode'}`;
+      document.getElementById('media-desc').innerText = `Série - Saison ${ep.season}`;
+      document.getElementById('media-badge').innerText = "SÉRIE";
+      document.getElementById('info-format').innerText = ext.toUpperCase();
+
+      playStream(streamUrl, ext);
+    }
+
+    function closeSeriesModal() {
+      document.getElementById('series-modal').classList.add('hidden');
+    }
+
+    // --- LECTEUR ET LECTURE MULTIMÉDIA ---
+    function initPlayer() {
+      const video = document.getElementById('main-player');
+      video.addEventListener('play', () => {
+        document.getElementById('player-overlay').classList.add('hidden');
+      });
+      video.addEventListener('error', () => {
+        showPlayerError("Erreur lors de la lecture du flux (Format non supporté ou lien indisponible).");
+      });
+    }
+
+    function playStream(url, ext) {
+      const video = document.getElementById('main-player');
+      document.getElementById('player-overlay').classList.add('hidden');
+
+      if (hlsPlayer) {
+        hlsPlayer.destroy();
+        hlsPlayer = null;
+      }
+
+      const isHls = ext === 'm3u8' || ext === 'ts' || url.includes('.m3u8') || currentTab === 'live' || currentTab === 'radio';
+
+      if (isHls && typeof Hls !== 'undefined' && Hls.isSupported()) {
+        hlsPlayer = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true
+        });
+        hlsPlayer.loadSource(url);
+        hlsPlayer.attachMedia(video);
+
+        hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+          video.play().catch(() => console.log("Lecture automatique bloquée par le navigateur."));
+        });
+
+        hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            showPlayerError("Impossible de lire ce flux multimédia.");
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl') || !isHls) {
+        video.src = url;
+        video.play().catch(() => console.log("Autoplay bloqué"));
+      } else {
+        showPlayerError("Ce format n'est pas pris en charge par votre navigateur.");
+      }
+    }
+
+    function showPlayerError(msg) {
+      document.getElementById('overlay-msg').innerText = msg;
+      document.getElementById('player-overlay').classList.remove('hidden');
+    }
+
+    function retryPlayback() {
+      if (activeMedia) selectMedia(activeMedia);
+    }
+  </script>
+</body>
+</html>
