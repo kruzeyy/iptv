@@ -60,7 +60,7 @@
     }
   </style>
 </head>
-<body class="bg-dark-bg text-gray-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+<body class="bg-dark-bg text-gray-100 font-sans h-screen h-[100dvh] flex flex-col overflow-hidden select-none">
 
   <!-- BARRE DE NAVIGATION EN HAUT -->
   <header class="h-16 bg-dark-card border-b border-dark-border px-4 flex items-center justify-between z-20 flex-shrink-0">
@@ -136,10 +136,11 @@
   </div>
 
   <!-- ZONE PRINCIPALE -->
-  <div class="flex-1 flex overflow-hidden relative">
-    
+  <!-- Mobile : lecteur en haut, liste en dessous. Desktop : liste à gauche, lecteur à droite -->
+  <div class="flex-1 flex flex-col md:flex-row overflow-hidden relative min-h-0">
+
     <!-- BARRE SIDÉRALE (Catégories & Liste) -->
-    <aside class="w-full md:w-80 lg:w-96 bg-dark-card border-r border-dark-border flex flex-col flex-shrink-0 z-10 transition-all duration-300">
+    <aside class="order-2 md:order-1 w-full md:w-80 lg:w-96 flex-1 md:flex-none min-h-0 bg-dark-card md:border-r border-dark-border flex flex-col z-10 transition-all duration-300">
       
       <!-- Barre de recherche et filtre -->
       <div class="p-3 border-b border-dark-border space-y-2 bg-gray-900/50">
@@ -179,12 +180,12 @@
     </aside>
 
     <!-- CONTENU PRINCIPAL (Lecteur & Métadonnées) -->
-    <main class="flex-1 bg-black flex flex-col overflow-hidden relative">
-      
+    <main class="order-1 md:order-2 flex-shrink-0 md:flex-1 bg-black flex flex-col overflow-hidden relative">
+
       <!-- CONTENEUR DU LECTEUR VIDÉO / AUDIO -->
-      <div class="flex-1 bg-black flex items-center justify-center relative group">
-        <!-- Moniteur de lecture / Vidéo -->
-        <video id="main-player" controls class="w-full h-full max-h-full object-contain"></video>
+      <div class="w-full aspect-video md:aspect-auto md:flex-1 bg-black flex items-center justify-center relative group">
+        <!-- Moniteur de lecture / Vidéo (playsinline : indispensable sur iPhone) -->
+        <video id="main-player" controls playsinline webkit-playsinline class="w-full h-full max-h-full object-contain"></video>
 
         <!-- Visualiseur Audio (Mode Radio) -->
         <div id="radio-visualizer" class="hidden absolute inset-0 bg-gradient-to-br from-indigo-950 via-slate-900 to-black flex flex-col items-center justify-center text-center p-6">
@@ -207,9 +208,9 @@
       </div>
 
       <!-- BARRE D'INFORMATIONS DU PROGRAMME SÉLECTIONNÉ -->
-      <div id="media-info-bar" class="bg-dark-card border-t border-dark-border p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center space-x-3">
-          <img id="media-icon" src="https://placehold.co/64x64/111827/0ea5e9?text=IPTV" alt="Logo" class="w-12 h-12 rounded-lg object-contain bg-gray-900 border border-gray-800">
+      <div id="media-info-bar" class="bg-dark-card border-y md:border-b-0 border-dark-border p-2 md:p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 flex-shrink-0">
+        <div class="flex items-center space-x-3 min-w-0">
+          <img id="media-icon" src="https://placehold.co/64x64/111827/0ea5e9?text=IPTV" alt="Logo" class="w-8 h-8 md:w-12 md:h-12 rounded-lg object-contain bg-gray-900 border border-gray-800 flex-shrink-0">
           <div>
             <div class="flex items-center space-x-2">
               <span id="media-badge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-brand-600 text-white">LIVE</span>
@@ -309,6 +310,17 @@
           <input type="checkbox" id="cfg-proxy" class="w-4 h-4 accent-brand-500 rounded cursor-pointer">
         </div>
 
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">URL du Proxy CORS</label>
+          <input type="text" id="cfg-proxy-url" list="proxy-presets" placeholder="https://corsproxy.io/?url="
+                 class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
+          <datalist id="proxy-presets">
+            <option value="https://corsproxy.io/?url="></option>
+            <option value="https://api.allorigins.win/raw?url="></option>
+          </datalist>
+          <div class="text-[11px] text-gray-500 mt-1">L'adresse du flux est ajoutée (encodée) à la fin de cette URL.</div>
+        </div>
+
         <div class="pt-2 flex justify-end space-x-2">
           <button type="button" onclick="closeConfigModal()" class="px-4 py-2 rounded-lg border border-gray-700 text-sm font-medium text-gray-300 hover:bg-gray-800">
             Annuler
@@ -328,7 +340,8 @@
       server: "http://smartersprotv.myftp.biz",
       user: "0ade329f6c",
       pass: "e813e7605da3",
-      useProxy: true // Activé par défaut pour éviter le blocage CORS
+      useProxy: true, // Activé par défaut pour éviter le blocage CORS
+      proxyUrl: "https://corsproxy.io/?url="
     };
 
     // Expression régulière pour identifier le contenu Français
@@ -344,9 +357,6 @@
     let hlsPlayer = null;
     let currentSeriesData = null;
 
-    // Proxy CORS pour contourner les limitations des requêtes HTTP directes
-    const CORS_PROXY = "https://corsproxy.io/?";
-
     // Initialisation
     window.addEventListener('DOMContentLoaded', () => {
       lucide.createIcons();
@@ -358,9 +368,32 @@
     function loadSavedConfig() {
       const saved = localStorage.getItem('iptv_config_v2');
       if (saved) {
-        try { config = JSON.parse(saved); } catch(e){}
+        // Fusion avec les valeurs par défaut (les anciennes sauvegardes n'ont pas proxyUrl)
+        try { config = { ...DEFAULT_CONFIG, ...JSON.parse(saved) }; } catch(e){}
       }
       updateProxyUI();
+    }
+
+    // Une page HTTPS (GitHub Pages, etc.) ne peut pas charger un serveur en HTTP :
+    // le navigateur bloque ("mixed content"). Dans ce cas le proxy HTTPS est obligatoire.
+    function proxyRequired() {
+      return location.protocol === 'https:' && /^http:\/\//i.test(config.server);
+    }
+
+    function isProxyActive() {
+      return config.useProxy || proxyRequired();
+    }
+
+    function proxify(url) {
+      const prefix = config.proxyUrl || DEFAULT_CONFIG.proxyUrl;
+      if (!isProxyActive() || !url || url.startsWith(prefix)) return url;
+      return prefix + encodeURIComponent(url);
+    }
+
+    // Images (logos, affiches) : en HTTP elles sont bloquées sur une page HTTPS
+    function imgUrl(url) {
+      if (!url) return url;
+      return (location.protocol === 'https:' && /^http:\/\//i.test(url)) ? proxify(url) : url;
     }
 
     function saveConfiguration(e) {
@@ -369,6 +402,7 @@
       config.user   = document.getElementById('cfg-user').value.trim();
       config.pass   = document.getElementById('cfg-pass').value.trim();
       config.useProxy = document.getElementById('cfg-proxy').checked;
+      config.proxyUrl = document.getElementById('cfg-proxy-url').value.trim() || DEFAULT_CONFIG.proxyUrl;
 
       localStorage.setItem('iptv_config_v2', JSON.stringify(config));
       updateProxyUI();
@@ -381,6 +415,7 @@
       document.getElementById('cfg-user').value   = config.user;
       document.getElementById('cfg-pass').value   = config.pass;
       document.getElementById('cfg-proxy').checked = config.useProxy;
+      document.getElementById('cfg-proxy-url').value = config.proxyUrl || DEFAULT_CONFIG.proxyUrl;
       document.getElementById('config-modal').classList.remove('hidden');
     }
 
@@ -397,7 +432,10 @@
 
     function updateProxyUI() {
       const txt = document.getElementById('proxy-status-text');
-      if (config.useProxy) {
+      if (!config.useProxy && proxyRequired()) {
+        txt.innerText = "AUTO";
+        txt.className = "text-yellow-400 font-bold";
+      } else if (config.useProxy) {
         txt.innerText = "ON";
         txt.className = "text-green-400 font-bold";
       } else {
@@ -410,7 +448,20 @@
     function buildApiUrl(action) {
       let base = `${config.server}/player_api.php?username=${config.user}&password=${config.pass}`;
       if (action) base += `&action=${action}`;
-      return config.useProxy ? `${CORS_PROXY}${encodeURIComponent(base)}` : base;
+      return proxify(base);
+    }
+
+    // Requête API JSON avec délai max et message d'erreur explicite
+    async function apiFetch(action) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 20000);
+      try {
+        const res = await fetch(buildApiUrl(action), { signal: ctrl.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}${isProxyActive() ? " (via proxy)" : ""}`);
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     function buildStreamUrl(type, streamId, ext = 'm3u8') {
@@ -422,7 +473,9 @@
       } else if (type === 'series') {
         url = `${config.server}/series/${config.user}/${config.pass}/${streamId}.${ext}`;
       }
-      return config.useProxy ? `${CORS_PROXY}${encodeURIComponent(url)}` : url;
+      // URL réelle (non proxifiée) : le proxy est appliqué au moment de la lecture,
+      // requête par requête, pour que les segments HLS passent aussi par le proxy.
+      return url;
     }
 
     // --- CONNEXION COMPTE ---
@@ -434,10 +487,7 @@
       statusDot.className = "w-2 h-2 rounded-full bg-yellow-500 inline-block";
 
       try {
-        const res = await fetch(buildApiUrl());
-        if (!res.ok) throw new Error("Réponse serveur invalide");
-        
-        const data = await res.json();
+        const data = await apiFetch();
         if (data.user_info && data.user_info.auth === 1) {
           statusText.innerText = `Connecté (${data.user_info.username})`;
           statusDot.className = "w-2 h-2 rounded-full bg-green-500 inline-block";
@@ -451,7 +501,10 @@
         console.error("Erreur de connexion:", err);
         statusText.innerText = "Erreur de connexion";
         statusDot.className = "w-2 h-2 rounded-full bg-red-500 inline-block";
-        showErrorInList("Impossible de se connecter au serveur IPTV. Si vous êtes dans un navigateur moderne, conservez l'option Proxy activée.");
+        showErrorInList(`Impossible de se connecter au serveur IPTV (${err.message}). ` +
+          (isProxyActive()
+            ? "Le proxy a peut-être refusé la requête : essayez un autre proxy dans les Paramètres."
+            : "Essayez d'activer le Proxy."));
       }
     }
 
@@ -499,13 +552,11 @@
       }
 
       try {
-        const [catRes, streamRes] = await Promise.all([
-          fetch(buildApiUrl(catAction)),
-          fetch(buildApiUrl(streamAction))
+        let streams;
+        [rawCategories, streams] = await Promise.all([
+          apiFetch(catAction),
+          apiFetch(streamAction)
         ]);
-
-        rawCategories = await catRes.json();
-        let streams = await streamRes.json();
 
         if (currentTab === 'radio') {
           streams = streams.filter(s => {
@@ -527,7 +578,7 @@
 
       } catch (err) {
         console.error("Erreur chargement onglet:", err);
-        showErrorInList("Erreur lors de la récupération des éléments.");
+        showErrorInList(`Erreur lors de la récupération des éléments (${err.message}).`);
       }
     }
 
@@ -641,11 +692,11 @@
           const card = document.createElement('div');
           card.className = "bg-gray-800/60 rounded-lg overflow-hidden border border-gray-700/50 hover:border-brand-500 cursor-pointer transition group flex flex-col";
           
-          const icon = item.stream_icon || item.cover || 'https://placehold.co/150x225/111827/0ea5e9?text=Pas+d+image';
+          const icon = imgUrl(item.stream_icon || item.cover) || 'https://placehold.co/150x225/111827/0ea5e9?text=Pas+d+image';
 
           card.innerHTML = `
             <div class="aspect-poster relative overflow-hidden bg-gray-900">
-              <img src="${icon}" onerror="this.src='https://placehold.co/150x225/111827/0ea5e9?text=Pas+d+image'" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+              <img src="${icon}" loading="lazy" onerror="this.src='https://placehold.co/150x225/111827/0ea5e9?text=Pas+d+image'" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
               <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-2">
                 <i data-lucide="play-circle" class="w-8 h-8 text-brand-500 mx-auto"></i>
               </div>
@@ -666,10 +717,10 @@
           const row = document.createElement('div');
           row.className = "p-2 rounded-lg hover:bg-gray-800/80 cursor-pointer transition flex items-center space-x-3 group border border-transparent hover:border-gray-700";
           
-          const icon = item.stream_icon || 'https://placehold.co/48x48/111827/0ea5e9?text=TV';
+          const icon = imgUrl(item.stream_icon) || 'https://placehold.co/48x48/111827/0ea5e9?text=TV';
 
           row.innerHTML = `
-            <img src="${icon}" onerror="this.src='https://placehold.co/48x48/111827/0ea5e9?text=TV'" class="w-10 h-10 rounded object-contain bg-gray-900 border border-gray-800 flex-shrink-0">
+            <img src="${icon}" loading="lazy" onerror="this.src='https://placehold.co/48x48/111827/0ea5e9?text=TV'" class="w-10 h-10 rounded object-contain bg-gray-900 border border-gray-800 flex-shrink-0">
             <div class="flex-1 min-w-0">
               <div class="font-medium text-sm text-gray-200 group-hover:text-brand-400 truncate">${item.name || 'Chaîne'}</div>
               <div class="text-xs text-gray-500 truncate">${categoriesMap.get(item.category_id) || 'En direct'}</div>
@@ -704,7 +755,7 @@
         return;
       }
 
-      const icon = item.stream_icon || item.cover || 'https://placehold.co/64x64/111827/0ea5e9?text=IPTV';
+      const icon = imgUrl(item.stream_icon || item.cover) || 'https://placehold.co/64x64/111827/0ea5e9?text=IPTV';
       document.getElementById('media-icon').src = icon;
       document.getElementById('media-title').innerText = item.name || "Inconnu";
       document.getElementById('media-desc').innerText = `Catégorie: ${categoriesMap.get(item.category_id) || 'Général'}`;
@@ -732,14 +783,13 @@
     async function openSeriesModal(item) {
       document.getElementById('series-modal-title').innerText = item.name || "Série";
       document.getElementById('series-modal-name').innerText = item.name || "";
-      document.getElementById('series-modal-cover').src = item.cover || item.stream_icon || "https://placehold.co/150x225/111827/0ea5e9?text=Série";
+      document.getElementById('series-modal-cover').src = imgUrl(item.cover || item.stream_icon) || "https://placehold.co/150x225/111827/0ea5e9?text=Série";
       document.getElementById('series-modal-plot').innerText = item.plot || "Chargement des détails de la série...";
       
       document.getElementById('series-modal').classList.remove('hidden');
 
       try {
-        const res = await fetch(buildApiUrl(`get_series_info&series_id=${item.series_id}`));
-        const data = await res.json();
+        const data = await apiFetch(`get_series_info&series_id=${item.series_id}`);
         currentSeriesData = data;
 
         const seasons = data.seasons || [];
@@ -792,7 +842,7 @@
       const ext = ep.container_extension || 'mp4';
       const streamUrl = buildStreamUrl('series', ep.id, ext);
 
-      document.getElementById('media-icon').src = ep.info?.movie_image || 'https://placehold.co/64x64/111827/0ea5e9?text=Épisode';
+      document.getElementById('media-icon').src = imgUrl(ep.info?.movie_image) || 'https://placehold.co/64x64/111827/0ea5e9?text=Épisode';
       document.getElementById('media-title').innerText = `${ep.title || 'Épisode'}`;
       document.getElementById('media-desc').innerText = `Série - Saison ${ep.season}`;
       document.getElementById('media-badge').innerText = "SÉRIE";
@@ -816,6 +866,29 @@
       });
     }
 
+    // Loader HLS qui fait passer CHAQUE requête (playlist, sous-playlists, segments .ts)
+    // par le proxy, tout en faisant croire à hls.js qu'il a chargé l'URL réelle.
+    // Sans ça, seule la playlist .m3u8 passait par le proxy : les segments relatifs
+    // étaient résolus vers "https://corsproxy.io/123.ts" (404) et les segments
+    // absolus en http:// étaient bloqués sur mobile / page HTTPS.
+    function createProxyLoader() {
+      const BaseLoader = Hls.DefaultConfig.loader;
+      return class ProxyLoader extends BaseLoader {
+        load(context, cfg, callbacks) {
+          const realUrl = context.url;
+          context.url = proxify(realUrl);
+          super.load(context, cfg, {
+            ...callbacks,
+            onSuccess: (response, stats, ctx, details) => {
+              response.url = realUrl;
+              ctx.url = realUrl;
+              callbacks.onSuccess(response, stats, ctx, details);
+            }
+          });
+        }
+      };
+    }
+
     function playStream(url, ext) {
       const video = document.getElementById('main-player');
       document.getElementById('player-overlay').classList.add('hidden');
@@ -828,10 +901,12 @@
       const isHls = ext === 'm3u8' || ext === 'ts' || url.includes('.m3u8') || currentTab === 'live' || currentTab === 'radio';
 
       if (isHls && typeof Hls !== 'undefined' && Hls.isSupported()) {
-        hlsPlayer = new Hls({
+        const hlsConfig = {
           enableWorker: true,
-          lowLatencyMode: true
-        });
+          lowLatencyMode: false // plus tolérant sur réseau mobile
+        };
+        if (isProxyActive()) hlsConfig.loader = createProxyLoader();
+        hlsPlayer = new Hls(hlsConfig);
         hlsPlayer.loadSource(url);
         hlsPlayer.attachMedia(video);
 
@@ -841,11 +916,14 @@
 
         hlsPlayer.on(Hls.Events.ERROR, (event, data) => {
           if (data.fatal) {
-            showPlayerError("Impossible de lire ce flux multimédia.");
+            console.error("Erreur HLS:", data);
+            const code = data.response?.code ? ` (HTTP ${data.response.code})` : "";
+            showPlayerError(`Impossible de lire ce flux multimédia : ${data.details}${code}.`);
           }
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl') || !isHls) {
-        video.src = url;
+        // Films MP4/MKV, ou HLS natif (vieux iPhone sans MSE)
+        video.src = proxify(url);
         video.play().catch(() => console.log("Autoplay bloqué"));
       } else {
         showPlayerError("Ce format n'est pas pris en charge par votre navigateur.");
