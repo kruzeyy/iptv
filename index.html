@@ -165,7 +165,7 @@
       <!-- Compteur et Infos -->
       <div class="px-3 py-1.5 bg-gray-900/80 border-b border-dark-border flex justify-between items-center text-xs text-gray-400">
         <span id="items-count">0 élément(s)</span>
-        <button onclick="loadCurrentTabContent(true)" class="hover:text-white flex items-center gap-1 transition">
+        <button onclick="refreshContent()" class="hover:text-white flex items-center gap-1 transition">
           <i data-lucide="refresh-cw" class="w-3 h-3"></i> Actualiser
         </button>
       </div>
@@ -312,12 +312,8 @@
 
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">URL du Proxy CORS</label>
-          <input type="text" id="cfg-proxy-url" list="proxy-presets" placeholder="https://corsproxy.io/?url="
+          <input type="text" id="cfg-proxy-url" placeholder="/api/iptv_proxy?token=...&url="
                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500">
-          <datalist id="proxy-presets">
-            <option value="https://corsproxy.io/?url="></option>
-            <option value="https://api.allorigins.win/raw?url="></option>
-          </datalist>
           <div class="text-[11px] text-gray-500 mt-1">L'adresse du flux est ajoutée (encodée) à la fin de cette URL.</div>
         </div>
 
@@ -341,7 +337,10 @@
       user: "0ade329f6c",
       pass: "e813e7605da3",
       useProxy: true, // Activé par défaut pour éviter le blocage CORS
-      proxyUrl: "https://corsproxy.io/?url="
+      // Proxy de Home Assistant (custom_components/iptv_proxy). Adresse relative :
+      // marche à la maison (http://homeassistant.local:8123) comme à l'extérieur (https).
+      // Le token doit être identique à celui de configuration.yaml.
+      proxyUrl: "/api/iptv_proxy?token=RSSlWu7H7CvkpcLAobV9QtSE&url="
     };
 
     // Expression régulière pour identifier le contenu Français
@@ -356,6 +355,7 @@
     let activeMedia = null;
     let hlsPlayer = null;
     let currentSeriesData = null;
+    let isConnected = false;
 
     // Initialisation
     window.addEventListener('DOMContentLoaded', () => {
@@ -370,6 +370,8 @@
       if (saved) {
         // Fusion avec les valeurs par défaut (les anciennes sauvegardes n'ont pas proxyUrl)
         try { config = { ...DEFAULT_CONFIG, ...JSON.parse(saved) }; } catch(e){}
+        // corsproxy.io est devenu payant : on bascule les anciennes sauvegardes sur le proxy HA
+        if (/corsproxy\.io/.test(config.proxyUrl || "")) config.proxyUrl = DEFAULT_CONFIG.proxyUrl;
       }
       updateProxyUI();
     }
@@ -427,7 +429,7 @@
       config.useProxy = !config.useProxy;
       localStorage.setItem('iptv_config_v2', JSON.stringify(config));
       updateProxyUI();
-      loadCurrentTabContent(true);
+      refreshContent();
     }
 
     function updateProxyUI() {
@@ -457,7 +459,19 @@
       const timer = setTimeout(() => ctrl.abort(), 20000);
       try {
         const res = await fetch(buildApiUrl(action), { signal: ctrl.signal });
-        if (!res.ok) throw new Error(`HTTP ${res.status}${isProxyActive() ? " (via proxy)" : ""}`);
+        if (!res.ok) {
+          const body = await res.text().catch(() => "");
+          if (isProxyActive() && /api key/i.test(body)) {
+            throw new Error("le proxy refuse la requête : corsproxy.io exige désormais une clé API payante. Changez de proxy dans les Paramètres");
+          }
+          if (isProxyActive() && res.status === 404) {
+            throw new Error("proxy Home Assistant introuvable : l'intégration iptv_proxy n'est pas installée ou HA n'a pas été redémarré");
+          }
+          if (isProxyActive() && /token invalide/i.test(body)) {
+            throw new Error("token du proxy différent de celui de configuration.yaml");
+          }
+          throw new Error(`HTTP ${res.status}${isProxyActive() ? " (via proxy)" : ""}`);
+        }
         return await res.json();
       } finally {
         clearTimeout(timer);
@@ -483,12 +497,14 @@
       const statusText = document.getElementById('status-text');
       const statusDot  = document.getElementById('status-dot');
       
+      isConnected = false;
       statusText.innerText = "Connexion au serveur...";
       statusDot.className = "w-2 h-2 rounded-full bg-yellow-500 inline-block";
 
       try {
         const data = await apiFetch();
         if (data.user_info && data.user_info.auth === 1) {
+          isConnected = true;
           statusText.innerText = `Connecté (${data.user_info.username})`;
           statusDot.className = "w-2 h-2 rounded-full bg-green-500 inline-block";
           document.getElementById('info-server').innerText = `Serveur: ${config.server}`;
@@ -506,6 +522,13 @@
             ? "Le proxy a peut-être refusé la requête : essayez un autre proxy dans les Paramètres."
             : "Essayez d'activer le Proxy."));
       }
+    }
+
+    // Bouton "Actualiser" / proxy : si la connexion avait échoué, on retente la connexion
+    // au lieu de charger une liste vide ("Aucun résultat dans cette catégorie")
+    function refreshContent() {
+      if (isConnected) loadCurrentTabContent(true);
+      else connectAndFetchAccount();
     }
 
     // --- NAVIGATION D'ONGLETS ---
@@ -557,6 +580,7 @@
           apiFetch(catAction),
           apiFetch(streamAction)
         ]);
+        if (!Array.isArray(streams)) throw new Error("réponse inattendue du serveur");
 
         if (currentTab === 'radio') {
           streams = streams.filter(s => {
@@ -880,7 +904,10 @@
           super.load(context, cfg, {
             ...callbacks,
             onSuccess: (response, stats, ctx, details) => {
-              response.url = realUrl;
+              // Le proxy HA indique l'URL finale après redirection (fréquent sur Xtream)
+              let finalUrl = null;
+              try { finalUrl = details?.getResponseHeader?.('X-Final-Url'); } catch (e) {}
+              response.url = finalUrl || realUrl;
               ctx.url = realUrl;
               callbacks.onSuccess(response, stats, ctx, details);
             }
